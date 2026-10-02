@@ -10,96 +10,64 @@
       </span>
     </h2>
 
-    <div class="timeline">
+    <!-- 仅当前刊名：保持原有单层时间轴 -->
+    <template v-if="!data.include_lineage">
+      <div class="timeline">
+        <SlotCard
+          v-for="slot in data.slots"
+          :key="slot.number_id"
+          :slot="slot"
+          @mark-lost="(id) => $emit('mark-lost', id)"
+        />
+      </div>
+    </template>
+
+    <!-- 包含前身/后继：按刊名分组，每组带角色徽标，编号/条码/装订不混排 -->
+    <template v-else>
+      <p class="muted" style="margin-top:-4px">
+        沿革视图：前身 → 当前 → 后继连续展示；编号槽位、条码与装订各自归属原刊名，
+        更名不迁移实体。
+      </p>
       <div
-        v-for="slot in data.slots"
-        :key="slot.number_id"
-        class="slot"
-        :class="dotClass(slot.holding_status)"
+        v-for="g in data.groups"
+        :key="g.title_id"
+        class="lineage-group"
+        :class="g.lineage_role"
       >
-        <span class="dot"></span>
-        <div class="slot-card" :class="{ gap: isGap(slot.holding_status) }">
-          <div class="slot-head">
-            <span class="slot-no">
-              v.{{ slot.volume || "—" }} no.{{ slot.number }}
-            </span>
-            <span class="badge" :class="badgeCls(slot.holding_status)">
-              {{ statusMeta(slot.holding_status).label }}
-            </span>
-            <span class="slot-hint">{{ statusMeta(slot.holding_status).hint }}</span>
-          </div>
-
-          <!-- 缺号：没有发行记录，不展示入藏入口暗示 -->
-          <template v-if="slot.issues.length === 0">
-            <p class="empty-hint">
-              该编号槽位没有发行记录（缺号）。只有登记了发行期，才能为其入藏。
-            </p>
-          </template>
-
-          <div
-            v-for="iss in slot.issues"
-            :key="iss.issue_id"
-            class="issue-box"
-            :class="{ combined: iss.kind === 'combined' }"
-          >
-            <div class="slot-head">
-              <span class="issue-month">{{ monthRange(iss) }}</span>
-              <span v-if="iss.kind === 'combined'" class="badge combined">
-                合刊 {{ iss.combined_numbers.map(n => `v.${n.volume||"—"}no.${n.number}`).join(" + ") }}
-              </span>
-              <span v-else class="muted">普通期</span>
-            </div>
-
-            <p v-if="iss.items.length === 0" class="empty-hint">
-              已发行但尚无实物 —— 此为「缺藏」，请在右侧入藏面板登记。
-            </p>
-
-            <div v-for="it in iss.items" :key="it.barcode" class="item-line">
-              <code>{{ it.barcode }}</code>
-              <span class="badge" :class="it.status === 'lost' ? 'missing' : 'ok'">
-                {{ itemStatus[it.status] || it.status }}
-              </span>
-              <span class="loc">
-                📍 {{ it.location || "（未排架）" }}
-                <template v-if="it.bound">（装订册 {{ it.binding }}）</template>
-              </span>
-              <button
-                v-if="!it.bound && it.status !== 'lost'"
-                class="tiny ghost"
-                @click="$emit('mark-lost', it.item_id)"
-                title="标记丢失后，该期变为缺藏"
-              >报失</button>
-            </div>
-          </div>
+        <div class="lineage-head">
+          <strong style="font-size:15px">{{ g.title.title }}</strong>
+          <span class="muted">{{ g.title.issn || "无 ISSN" }}</span>
+          <span class="badge" :class="roleMeta(g.lineage_role).cls">
+            {{ roleMeta(g.lineage_role).label }}
+          </span>
+          <span v-if="g.effective_from" class="muted">
+            自 {{ g.effective_from.slice(0, 7) }} 起归该刊名
+          </span>
+        </div>
+        <div class="timeline">
+          <SlotCard
+            v-for="slot in g.slots"
+            :key="`${g.title_id}-${slot.number_id}`"
+            :slot="slot"
+            @mark-lost="(id) => $emit('mark-lost', id)"
+          />
+          <p v-if="g.slots.length === 0" class="empty-hint">
+            该刊名下尚无编号槽位。
+          </p>
         </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { HOLDING_STATUS, ITEM_STATUS } from "../status.js";
+import SlotCard from "./SlotCard.vue";
+import { LINEAGE_ROLE } from "../status.js";
 
 defineProps({ data: Object });
 defineEmits(["mark-lost"]);
-const itemStatus = ITEM_STATUS;
 
-const isGap = (s) => s === "not_published" || s === "ceased_gap";
-
-function statusMeta(s) {
-  return HOLDING_STATUS[s] || { label: s, cls: "gap", hint: "" };
-}
-function badgeCls(s) {
-  return statusMeta(s).cls;
-}
-function dotClass(s) {
-  if (s === "issued+held") return "held";
-  if (s === "issued+missing") return "missing";
-  return "gap";
-}
-function monthRange(iss) {
-  const a = iss.issue_month?.slice(0, 7);
-  const b = iss.issue_month_end?.slice(0, 7);
-  return b && b !== a ? `${a} ~ ${b}` : a;
+function roleMeta(role) {
+  return LINEAGE_ROLE[role] || { label: role, cls: "gap" };
 }
 </script>

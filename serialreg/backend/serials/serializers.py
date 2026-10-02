@@ -1,18 +1,46 @@
+from datetime import datetime
+
 from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
-    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item, Title,
+    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item,
+    Title, TitleSuccession, TitleSuccessionEvent,
+    establish_succession, issue_month_conflict, revoke_succession,
 )
 
 
+def _coerce_month(value):
+    """前端 <input type=month> 传 'YYYY-MM' 时补成当月 1 日。"""
+    if isinstance(value, str) and len(value) == 7:
+        try:
+            return datetime.strptime(value, "%Y-%m").date().replace(day=1)
+        except ValueError:
+            return value
+    return value
+
+
 class TitleSerializer(serializers.ModelSerializer):
+    # 仅在沿革视图（context 带 lineage）下出现，普通检索不返回，保持两视图分离
+    lineage_role = serializers.SerializerMethodField()
+    lineage_effective_from = serializers.SerializerMethodField()
+
     class Meta:
         model = Title
         fields = [
             "id", "title", "issn", "publisher", "status",
             "ceased_month", "created_at",
+            "lineage_role", "lineage_effective_from",
         ]
+
+    def get_lineage_role(self, obj):
+        return self.context.get("lineage", {}).get(obj.id, {}).get("role")
+
+    def get_lineage_effective_from(self, obj):
+        month = self.context.get("lineage", {}).get(obj.id, {}).get(
+            "effective_from",
+        )
+        return month.isoformat() if month else None
 
     def validate(self, attrs):
         status = attrs.get("status", getattr(self.instance, "status", None))
@@ -104,6 +132,20 @@ class IssueSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"issue_month_end": "截止年月不能早于起始年月。"},
             )
+        # 更名边界：按「起始发行月」归属，跨年卷/合刊的截止月不迁移实体
+        if title and start:
+            conflict = issue_month_conflict(title.id, start)
+            if conflict is not None:
+                other_id, _direction = conflict
+                other = Title.objects.get(pk=other_id)
+                raise serializers.ValidationError(
+                    {"issue_month": (
+                        f"{start:%Y-%m} 的发行应归属《{other.title}》"
+                        f"（ISSN {other.issn or '无'}）。更名不迁移任何编号或"
+                        "馆藏：生效月前的发行（含跨年卷/合刊）归原刊名，"
+                        "生效月后的新发行请登记到对应刊名下。"
+                    )},
+                )
         return attrs
 
     @transaction.atomic
@@ -252,3 +294,58 @@ class UnbindSerializer(serializers.Serializer):
         BindingEntry.objects.filter(binding=binding).delete()
         binding.delete()
         return [e.item for e in entries]
+
+
+class SuccessionSerializer(serializers.ModelSerializer):
+    """沿革边的只读表示：刊名与 ISSN 以建边时的快照为准（保留原刊名/原ISSN）。"""
+
+    class Meta:
+        model = TitleSuccession
+        fields = [
+            "id", "predecessor", "successor", "effective_month",
+            "predecessor_title_snapshot", "predecessor_issn_snapshot",
+            "successor_title_snapshot", "successor_issn_snapshot",
+            "note", "version", "is_active", "revoked_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SuccessionCreateSerializer(serializers.Serializer):
+    predecessor = serializers.PrimaryKeyRelatedField(queryset=Title.objects.all())
+    successor = serializers.PrimaryKeyRelatedField(queryset=Title.objects.all())
+    effective_month = serializers.DateField(input_formats=["%Y-%m-%d", "%Y-%m"])
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    actor = serializers.CharField(required=False, allow_blank=True, default="")
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_effective_month(self, value):
+        return _coerce_month(value)
+
+    def create(self, validated_data):
+        # 领域不变量（成环/矛盾/边界冲突）在 establish_succession 内事务性校验，
+        # Django ValidationError 由视图层转换为 400。
+        return establish_succession(**validated_data)
+
+
+class SuccessionRevokeSerializer(serializers.Serializer):
+    succession = serializers.PrimaryKeyRelatedField(
+        queryset=TitleSuccession.objects.all(),
+    )
+    actor = serializers.CharField(required=False, allow_blank=True, default="")
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def create(self, validated_data):
+        return revoke_succession(**validated_data)
+
+
+class SuccessionEventSerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(source="get_action_display", read_only=True)
+
+    class Meta:
+        model = TitleSuccessionEvent
+        fields = [
+            "id", "succession", "action", "action_label", "version",
+            "actor", "reason", "payload", "created_at",
+        ]
+        read_only_fields = fields

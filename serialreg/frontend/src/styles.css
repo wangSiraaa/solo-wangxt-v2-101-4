@@ -104,6 +104,30 @@ button.tiny { padding: 3px 9px; font-size: 12px; }
 .badge.gap { background: var(--gap-bg); color: var(--gap); }
 .badge.ceased { background: var(--ceased-bg); color: var(--ceased); }
 .badge.combined { background: var(--combined-bg); color: var(--combined); }
+.badge.lineage-pred { background: #e7f0fb; color: #2f5ea8; }
+.badge.lineage-succ { background: #e8f7f0; color: #0f7a52; }
+.badge.revoked { background: var(--ceased-bg); color: var(--muted); text-decoration: line-through; }
+
+/* 视图切换 */
+.viewtoggle {
+  display: inline-flex; border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; background: #fafbfc;
+}
+.viewtoggle button {
+  background: transparent; color: var(--muted); border-radius: 0;
+  padding: 6px 14px; font-size: 13px;
+}
+.viewtoggle button.on { background: var(--brand); color: #fff; }
+
+/* 沿革分组 */
+.lineage-group {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px 4px; margin-bottom: 18px; background: var(--panel);
+}
+.lineage-group.predecessor { background: #fbfdff; border-left: 4px solid #2f5ea8; }
+.lineage-group.successor { background: #fbfffd; border-left: 4px solid #0f7a52; }
+.lineage-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.lineage-arrow { color: var(--combined); font-weight: 700; }
 
 .msg { font-size: 13px; margin-top: 8px; }
 .msg.err { color: var(--missing); }

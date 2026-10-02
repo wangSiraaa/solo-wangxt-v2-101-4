@@ -19,8 +19,16 @@ async function request(path, options = {}) {
   return data;
 }
 
+// includeLineage=true → 「包含前身/后继」视图；缺省 → 「仅当前刊名」
+const lineageParam = (includeLineage) =>
+  includeLineage ? "&include_lineage=1" : "";
+
 export const api = {
-  listTitles: () => request("/titles/"),
+  listTitles: (search = "", includeLineage = false) =>
+    request(
+      `/titles/?${search ? `search=${encodeURIComponent(search)}` : ""}` +
+        (includeLineage ? `&include_lineage=1` : ""),
+    ),
   createTitle: (payload) =>
     request("/titles/", { method: "POST", body: JSON.stringify(payload) }),
   updateTitle: (id, payload) =>
@@ -29,7 +37,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  timeline: (titleId) => request(`/timeline/?title=${titleId}`),
+  timeline: (titleId, includeLineage = false) =>
+    request(`/timeline/?title=${titleId}${lineageParam(includeLineage)}`),
   listNumbers: (titleId) => request(`/numbers/?title=${titleId}`),
 
   createNumber: (payload) =>
@@ -44,11 +53,13 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  locate: (params) => {
+  locate: (params, includeLineage = false) => {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== "" && v != null),
     ).toString();
-    return request(`/items/locate/?${qs}`);
+    return request(
+      `/items/locate/?${qs}${lineageParam(includeLineage)}`,
+    );
   },
 
   listBindings: (titleId) =>
@@ -60,4 +71,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ binding_id: bindingId }),
     }),
+
+  // 刊名沿革（版本化关系 + 审计）
+  listSuccessions: (titleId, active = "") => {
+    const qs = new URLSearchParams();
+    if (titleId) qs.set("title", titleId);
+    if (active !== "") qs.set("active", active ? "1" : "0");
+    const tail = qs.toString();
+    return request(`/successions/${tail ? `?${tail}` : ""}`);
+  },
+  createSuccession: (payload) =>
+    request("/successions/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  revokeSuccession: (successionId, reason = "") =>
+    request("/successions/revoke/", {
+      method: "POST",
+      body: JSON.stringify({ succession: successionId, reason }),
+    }),
+  successionAudit: (titleId) =>
+    request(titleId ? `/successions/audit/?title=${titleId}` : "/successions/audit/"),
+  replaySuccessions: (titleId) =>
+    request(titleId ? `/successions/replay/?title=${titleId}` : "/successions/replay/"),
 };

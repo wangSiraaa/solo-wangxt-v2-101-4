@@ -5,7 +5,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from serials.models import (
-    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item, Title,
+    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item,
+    Title, TitleSuccession, establish_succession,
 )
 
 
@@ -83,6 +84,40 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 "✓ 装订册 Q/SY-2024：SY-8-34 + SY-8-5 → 装订库 C-12；"
                 "可调用 /api/bindings/unbind/ 拆订恢复原位置"))
+
+        # 5) 刊名沿革：《科技导刊》ISSN 4004-0004 于 2024-01 更名为
+        #    《科技导刊（新版）》ISSN 5005-0005。原刊名下保留 2023 年跨年卷，
+        #    新刊名下从生效月起发行——编号、ISSN、条码与装订均不迁移。
+        t4, _ = Title.objects.get_or_create(
+            issn="4004-0004",
+            defaults={"title": "科技导刊", "publisher": "科技导刊社"},
+        )
+        t5, _ = Title.objects.get_or_create(
+            issn="5005-0005",
+            defaults={"title": "科技导刊（新版）", "publisher": "科技导刊社"},
+        )
+        k10 = self._number(t4, "30", "10", 10)
+        k11 = self._number(t4, "30", "11", 11)
+        # 跨年卷：起始月 2023-12 在生效前，覆盖到 2024-01，仍归原刊名
+        cross4 = self._issue(
+            t4, "regular", date(2023, 12, 1), date(2024, 1, 1), [k10],
+        )
+        self._item("KD-3010", t4, cross4, "现刊区 D-01")
+        # 生效月起的新发行归新刊名（卷次另起）
+        new1 = self._number(t5, "1", "1", 1)
+        iss_new = self._issue(t5, "regular", date(2024, 1, 1), None, [new1])
+        self._item("KD-NEW-1", t5, iss_new, "现刊区 E-01")
+        if not TitleSuccession.objects.filter(
+                predecessor=t4, successor=t5).exists():
+            establish_succession(
+                predecessor=t4, successor=t5,
+                effective_month=date(2024, 1, 1),
+                note="样例：期刊更名，馆藏实体不迁移", actor="seed_sample",
+            )
+            self.stdout.write(self.style.SUCCESS(
+                f"✓ 沿革《{t4.title}》→《{t5.title}》自 2024-01 生效："
+                "原 ISSN/跨年卷 KD-3010 归原刊名，新发行 KD-NEW-1 归新刊名；"
+                "试试 /api/timeline/?title=<旧> &include_lineage=1"))
 
     def _number(self, title, volume, number, sort_key):
         obj, _ = IssueNumber.objects.get_or_create(

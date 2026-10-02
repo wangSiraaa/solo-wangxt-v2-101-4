@@ -28,3 +28,10 @@ export const ITEM_STATUS = {
 };
 
 export const ISSUE_KIND = { regular: "普通期", combined: "两期合刊" };
+
+// 沿革链上相对当前刊名的角色徽标
+export const LINEAGE_ROLE = {
+  self: { label: "当前刊名", cls: "ok" },
+  predecessor: { label: "前身刊名", cls: "lineage-pred" },
+  successor: { label: "后继刊名", cls: "lineage-succ" },
+};
