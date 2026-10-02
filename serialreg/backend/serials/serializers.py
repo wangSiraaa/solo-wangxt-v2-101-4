@@ -1,18 +1,84 @@
+from datetime import datetime
+
 from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
-    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item, Title,
+    Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item,
+    SuccessionAudit, Title, TitleSuccession,
+    correct_succession, create_succession,
+    revoke_succession,
 )
 
 
+def _coerce_month(value):
+    """前端 <input type=month> 传 'YYYY-MM' 或 'YYYY-MM-DD'，统一成当月 1 日。"""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date().replace(day=1)
+    text = str(value)
+    try:
+        if len(text) == 7:  # YYYY-MM
+            return datetime.strptime(text, "%Y-%m").date()
+        return datetime.strptime(text[:10], "%Y-%m-%d").date().replace(day=1)
+    except ValueError:
+        raise serializers.ValidationError("月份格式应为 YYYY-MM。")
+
+
 class TitleSerializer(serializers.ModelSerializer):
+    # 沿革摘要：始终只描述「书目层关系」，不携带任何馆藏数据
+    current_successor = serializers.SerializerMethodField()
+    current_predecessor = serializers.SerializerMethodField()
+
     class Meta:
         model = Title
         fields = [
             "id", "title", "issn", "publisher", "status",
             "ceased_month", "created_at",
+            "current_successor", "current_predecessor",
         ]
+
+    def _active_out(self, obj):
+        cached = getattr(obj, "_active_out_cache", None)
+        if cached is not None:
+            return cached.get(obj.id)
+        return obj.successions_out.filter(
+            state=TitleSuccession.State.ACTIVE,
+        ).select_related("successor").first()
+
+    def get_current_successor(self, obj):
+        row = self._active_out(obj)
+        if not row:
+            return None
+        return {
+            "succession_id": row.id,
+            "title_id": row.successor_id,
+            "title": row.successor.title,
+            "issn": row.successor.issn,
+            "effective_month": row.effective_month,
+            "predecessor_title_snapshot": row.predecessor_title_snapshot,
+            "predecessor_issn_snapshot": row.predecessor_issn_snapshot,
+        }
+
+    def get_current_predecessor(self, obj):
+        cached = getattr(obj, "_active_in_cache", None)
+        if cached is not None:
+            return cached.get(obj.id)
+        row = obj.successions_in.filter(
+            state=TitleSuccession.State.ACTIVE,
+        ).select_related("predecessor").first()
+        if not row:
+            return None
+        return {
+            "succession_id": row.id,
+            "title_id": row.predecessor_id,
+            "title": row.predecessor.title,
+            "issn": row.predecessor.issn,
+            "effective_month": row.effective_month,
+            "predecessor_title_snapshot": row.predecessor_title_snapshot,
+            "predecessor_issn_snapshot": row.predecessor_issn_snapshot,
+        }
 
     def validate(self, attrs):
         status = attrs.get("status", getattr(self.instance, "status", None))
@@ -24,6 +90,101 @@ class TitleSerializer(serializers.ModelSerializer):
                 {"ceased_month": "停刊刊名必须填写停刊月份。"},
             )
         return attrs
+
+
+class SuccessionSerializer(serializers.ModelSerializer):
+    """刊名沿革读模型：始终带出原刊名/原 ISSN 快照。"""
+
+    predecessor_title = serializers.CharField(
+        source="predecessor.title", read_only=True)
+    predecessor_issn_now = serializers.CharField(
+        source="predecessor.issn", read_only=True)
+    successor_title = serializers.CharField(
+        source="successor.title", read_only=True)
+    successor_issn = serializers.CharField(
+        source="successor.issn", read_only=True)
+    superseded_by_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = TitleSuccession
+        fields = [
+            "id", "predecessor", "successor",
+            "predecessor_title", "predecessor_issn_now",
+            "predecessor_title_snapshot", "predecessor_issn_snapshot",
+            "successor_title", "successor_issn",
+            "effective_month", "state", "superseded_by_id",
+            "revoked_at", "revoked_reason", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SuccessionCreateSerializer(serializers.Serializer):
+    predecessor = serializers.PrimaryKeyRelatedField(
+        queryset=Title.objects.all())
+    successor = serializers.PrimaryKeyRelatedField(
+        queryset=Title.objects.all())
+    effective_month = serializers.CharField(help_text="YYYY-MM")
+    detail = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_effective_month(self, value):
+        return _coerce_month(value)
+
+    def validate(self, attrs):
+        if attrs["predecessor"] == attrs["successor"]:
+            raise serializers.ValidationError(
+                {"successor": "前身刊与后继刊不能是同一刊名。"})
+        return attrs
+
+    def create(self, validated_data):
+        return create_succession(
+            predecessor=validated_data["predecessor"],
+            successor=validated_data["successor"],
+            effective_month=validated_data["effective_month"],
+            detail=validated_data.get("detail", ""),
+        )
+
+
+class SuccessionCorrectSerializer(serializers.Serializer):
+    successor = serializers.PrimaryKeyRelatedField(
+        queryset=Title.objects.all(), required=False)
+    effective_month = serializers.CharField(required=False)
+    detail = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_effective_month(self, value):
+        return _coerce_month(value)
+
+    def save_row(self, row):
+        return correct_succession(
+            row,
+            successor=self.validated_data.get("successor"),
+            effective_month=self.validated_data.get("effective_month"),
+            detail=self.validated_data.get("detail", ""),
+        )
+
+
+class SuccessionRevokeSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+    def save_row(self, row):
+        return revoke_succession(row, reason=self.validated_data.get("reason", ""))
+
+
+class SuccessionAuditSerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(source="get_action_display", read_only=True)
+    predecessor_title_now = serializers.CharField(
+        source="predecessor.title", read_only=True)
+    successor_title_now = serializers.CharField(
+        source="successor.title", read_only=True)
+
+    class Meta:
+        model = SuccessionAudit
+        fields = [
+            "id", "action", "action_label", "succession", "new_succession",
+            "predecessor", "successor", "effective_month",
+            "predecessor_title_snapshot", "predecessor_issn_snapshot",
+            "predecessor_title_now", "successor_title_now",
+            "detail", "created_at",
+        ]
 
 
 class IssueNumberSerializer(serializers.ModelSerializer):

@@ -6,6 +6,7 @@ from django.db import transaction
 
 from serials.models import (
     Binding, BindingEntry, Issue, IssueNumber, IssueNumbering, Item, Title,
+    create_succession,
 )
 
 
@@ -83,6 +84,35 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 "✓ 装订册 Q/SY-2024：SY-8-34 + SY-8-5 → 装订库 C-12；"
                 "可调用 /api/bindings/unbind/ 拆订恢复原位置"))
+
+        # 5) 刊名沿革：《学报旧版》2023-01 更名为《学报新版》。
+        #    旧版 2022 年的期号与装订不迁移；检索 lineage=1 时前后连续展示。
+        t_old, _ = Title.objects.get_or_create(
+            issn="4004-0004",
+            defaults={"title": "学报旧版", "publisher": "沿革出版社"},
+        )
+        t_new, _ = Title.objects.get_or_create(
+            issn="4004-0005",
+            defaults={"title": "学报新版", "publisher": "沿革出版社"},
+        )
+        o1 = self._number(t_old, "20", number="6", sort_key=6)
+        old_issue = self._issue(
+            t_old, "regular", date(2022, 12, 1), None, [o1])
+        self._item("YG-20-6", t_old, old_issue, "旧刊库 A-20")
+        w1 = self._number(t_new, "21", number="1", sort_key=1)
+        new_issue = self._issue(
+            t_new, "regular", date(2023, 1, 1), None, [w1])
+        self._item("YG-21-1", t_new, new_issue, "现刊区 C-03")
+        if not t_old.successions_out.filter(
+                state="active").exists():
+            create_succession(
+                predecessor=t_old, successor=t_new,
+                effective_month=date(2023, 1, 1),
+                detail="样例：2023-01 起更名（旧版期号与装订不迁移）",
+            )
+            self.stdout.write(self.style.SUCCESS(
+                "✓ 刊名沿革：《学报旧版》[4004-0004] → 《学报新版》"
+                "[4004-0005] @2023-01；?lineage=1 可连续检索，实体不迁移"))
 
     def _number(self, title, volume, number, sort_key):
         obj, _ = IssueNumber.objects.get_or_create(

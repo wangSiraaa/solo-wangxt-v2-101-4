@@ -19,8 +19,18 @@ async function request(path, options = {}) {
   return data;
 }
 
+const monthParam = (m) => (m ? (m.length === 7 ? `${m}-01` : m) : null);
+
 export const api = {
-  listTitles: () => request("/titles/"),
+  listTitles: (q = "", lineage = false) =>
+    request(
+      `/titles/?${new URLSearchParams(
+        Object.entries({ q, lineage: lineage ? 1 : "" }).filter(
+          ([, v]) => v !== "",
+        ),
+      )}`,
+    ),
+  titleLineage: (id) => request(`/titles/${id}/lineage/`),
   createTitle: (payload) =>
     request("/titles/", { method: "POST", body: JSON.stringify(payload) }),
   updateTitle: (id, payload) =>
@@ -29,7 +39,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  timeline: (titleId) => request(`/timeline/?title=${titleId}`),
+  timeline: (titleId, lineage = false) =>
+    request(`/timeline/?title=${titleId}${lineage ? "&lineage=1" : ""}`),
   listNumbers: (titleId) => request(`/numbers/?title=${titleId}`),
 
   createNumber: (payload) =>
@@ -60,4 +71,49 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ binding_id: bindingId }),
     }),
+
+  // ---- 刊名沿革（版本化关系 + 审计）----
+  listSuccessions: (titleId, state = "") =>
+    request(
+      `/successions/?${new URLSearchParams(
+        Object.entries({ title: titleId ?? "", state }).filter(
+          ([, v]) => v !== "",
+        ),
+      )}`,
+    ),
+  createSuccession: ({ predecessor, successor, effective_month, detail }) =>
+    request("/successions/", {
+      method: "POST",
+      body: JSON.stringify({
+        predecessor,
+        successor,
+        effective_month: monthParam(effective_month),
+        detail: detail || "",
+      }),
+    }),
+  correctSuccession: (id, payload) =>
+    request(`/successions/${id}/correct/`, {
+      method: "POST",
+      body: JSON.stringify({
+        successor: payload.successor,
+        effective_month: payload.effective_month
+          ? monthParam(payload.effective_month)
+          : undefined,
+        detail: payload.detail || "",
+      }),
+    }),
+  revokeSuccession: (id, reason) =>
+    request(`/successions/${id}/revoke/`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || "" }),
+    }),
+  successionAudits: (titleId, replay = false) =>
+    request(
+      `/successions/audits/?${new URLSearchParams(
+        Object.entries({
+          title: titleId ?? "",
+          replay: replay ? 1 : "",
+        }).filter(([, v]) => v !== ""),
+      )}`,
+    ),
 };

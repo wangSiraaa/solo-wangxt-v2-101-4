@@ -15,6 +15,10 @@
   --ceased-bg: #eef0f3;
   --combined: #6d3fb0;
   --combined-bg: #f1e9fb;
+  --predecessor: #1f6f8b;
+  --predecessor-bg: #e3f2f7;
+  --successor: #8a4b08;
+  --successor-bg: #fdf0e2;
 }
 
 * { box-sizing: border-box; }
@@ -168,3 +172,42 @@ button.tiny { padding: 3px 9px; font-size: 12px; }
   margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 8px;
 }
 code { background: #eef1f5; padding: 0 4px; border-radius: 4px; font-size: 12px; }
+
+/* 刊名沿革徽标与分组 */
+.badge.predecessor { background: var(--predecessor-bg); color: var(--predecessor); }
+.badge.successor { background: var(--successor-bg); color: var(--successor); }
+
+.chain-group { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.chain-group a { color: var(--brand); text-decoration: none; }
+.chain-current { font-weight: 700; }
+
+.lineage-group {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px 14px;
+  margin-bottom: 16px;
+  background: #fbfcfe;
+}
+.group-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+.chain-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 0; }
+
+.rel-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  background: #fff;
+}
+.rel-card.superseded { opacity: .72; background: #f7f8fa; }
+.rel-card.revoked { background: var(--missing-bg); }
+
+.audit-list { margin: 6px 0 8px; max-height: 220px; overflow-y: auto; }
+.audit-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  font-size: 12px; padding: 3px 0; border-bottom: 1px dotted var(--line);
+}
+.replay {
+  font-size: 11px; background: #f4f6f9; border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px; max-height: 240px; overflow: auto;
+}
